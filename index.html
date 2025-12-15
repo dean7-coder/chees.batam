@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Catur Modern – Final Stable</title>
+<style>
+:root{--light:#7dd3fc;--dark:#1e293b;--danger:#ef4444;--gold:#facc15;--ok:#22c55e}
+body{margin:0;background:#020617;color:white;font-family:Segoe UI,Arial;height:100vh;display:flex;justify-content:center;align-items:center}
+.lobby,.game{border-radius:18px;box-shadow:0 25px 60px rgba(0,0,0,.7)}
+.lobby{background:#020617;padding:28px;width:300px;text-align:center}
+.lobby button{width:100%;margin:6px 0;padding:12px;border:none;border-radius:12px;font-weight:700;cursor:pointer}
+.game{display:none;background:#020617;padding:14px;position:relative}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.top button{border:none;border-radius:999px;padding:6px 14px;background:#ef4444;color:white}
+#status{text-align:center;font-weight:900;color:var(--gold);height:22px}
+#overlay{position:absolute;inset:0;display:none;justify-content:center;align-items:center;font-size:42px;font-weight:900;color:var(--danger);background:rgba(2,6,23,.75);pointer-events:none}
+.board{display:grid;grid-template-columns:repeat(8,64px);grid-template-rows:repeat(8,64px)}
+.square{width:64px;height:64px;display:flex;justify-content:center;align-items:center;font-size:38px;position:relative}
+.light{background:var(--light)}
+.dark{background:var(--dark)}
+.white{color:#f8fafc}
+.black{color:#020617}
+.hl{box-shadow:inset 0 0 0 4px var(--ok)}
+#credit{position:fixed;left:16px;bottom:12px;color:rgba(255,255,255,0.65);font-size:13px;background:transparent;padding:6px 10px;border-radius:8px}
+/* promotion modal styles */
+#promoModal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;pointer-events:auto}
+#promoModal .box{background:#0b1220;padding:12px;border-radius:10px;display:flex;gap:8px}
+#promoModal button{padding:8px 10px;border-radius:8px;border:none;cursor:pointer;background:#1f2937;color:white}
+</style>
+</head>
+<body>
+
+<div class="lobby" id="lobby">
+ <h2 id="appHeader">♟️ chees batam</h2>
+ <button onclick="startGame('pvp')">2 PLAYER</button>
+ <button onclick="startGame('ai')">VS AI</button>
+</div>
+
+<div class="game" id="game">
+ <div class="top"><span id="mode"></span><button onclick="back()">KELUAR</button></div>
+ <div id="status"></div>
+ <div class="board" id="board"></div>
+ <div id="overlay"></div>
+ <!-- Promotion modal -->
+ <div id="promoModal"><div class="box">
+     <button data-piece="queen">Queen</button>
+     <button data-piece="rook">Rook</button>
+     <button data-piece="bishop">Bishop</button>
+     <button data-piece="knight">Knight</button>
+ </div></div>
+</div>
+
+<script>
+// FIX CANNOT PREVIEW: jangan pakai auto-global id, pakai query DOM
+const B = document.getElementById('board');
+const L = document.getElementById('lobby');
+const G = document.getElementById('game');
+const S = document.getElementById('status');
+const O = document.getElementById('overlay');
+const M = document.getElementById('mode');
+const APP_HEADER = document.getElementById('appHeader');
+if(APP_HEADER){ APP_HEADER.textContent = '♟️ chees batam'; document.title = 'chees batam'; }
+
+const W='♔♕♖♗♘♙',BK='♚♛♜♝♞♟';
+let boardArr=[],turn='white',from=null,mode='pvp',history=[];
+let promotionOpen = false;
+let pendingPromotion = null; // {to, color}
+
+function startPos(){boardArr=[
+ '♜','♞','♝','♛','♚','♝','♞','♜',
+ '♟','♟','♟','♟','♟','♟','♟','♟',
+ '','','','','','','','',
+ '','','','','','','','',
+ '','','','','','','','',
+ '','','','','','','','',
+ '♙','♙','♙','♙','♙','♙','♙','♙',
+ '♖','♘','♗','♕','♔','♗','♘','♖'
+];}
+
+function startGame(m){mode=m;turn='white';from=null;history=[];startPos();L.style.display='none';G.style.display='block';M.textContent=m.toUpperCase();draw();}
+function back(){G.style.display='none';L.style.display='block';}
+
+function draw(){
+ B.innerHTML='';
+ boardArr.forEach((p,i)=>{
+  const s=document.createElement('div');
+  s.className='square '+(((Math.floor(i/8)+i)%2?'dark':'light'));
+  if(from!==null&&legalMoves(from).includes(i)) s.classList.add('hl');
+  if(p){
+   const e=document.createElement('div');
+   e.textContent=p;
+   e.className=W.includes(p)?'white':'black';
+   e.onclick=()=>select(i);
+   s.appendChild(e);
+  }
+  s.onclick=()=>move(i);
+  B.appendChild(s);
+ });
+ checkState();
+}
+
+function select(i){
+    if(promotionOpen) return;
+    const p = boardArr[i];
+    if(!p) return;
+    if(turn==='white' && !W.includes(p)) return;
+    if(turn==='black' && !BK.includes(p)) return;
+    from = i; draw();
+}
+
+// move with promotion modal support
+function move(to){
+    if(promotionOpen) return;
+    if(from===null || from===to) return;
+    const p = boardArr[from];
+    const legal = legalMoves(from);
+    if(!legal.includes(to)) return;
+    history.push([...boardArr]);
+    // perform move
+    boardArr[to] = p;
+    boardArr[from] = '';
+    // pawn promotion: open modal if pawn reaches last rank
+    if(p === '♙' || p === '♟'){
+        const toR = Math.floor(to/8);
+        if((p === '♙' && toR === 0) || (p === '♟' && toR === 7)){
+            pendingPromotion = {to: to, color: (p === '♙') ? 'white' : 'black'};
+            promotionOpen = true;
+            showPromoModal();
+            draw();
+            return;
+        }
+    }
+    from = null;
+    turn = (turn === 'white') ? 'black' : 'white';
+    draw();
+    if(mode === 'ai' && turn === 'black') setTimeout(ai, 400);
+}
+
+function showPromoModal(){
+    const modal = document.getElementById('promoModal'); if(!modal) return;
+    modal.style.display = 'flex';
+    modal.querySelectorAll('button').forEach(b=>{
+        b.onclick = ()=>{ applyPromotion(b.dataset.piece); };
+    });
+}
+
+function hidePromoModal(){
+    const modal = document.getElementById('promoModal'); if(modal) modal.style.display='none';
+    promotionOpen = false; pendingPromotion = null;
+}
+
+function applyPromotion(choice){
+    if(!pendingPromotion) return;
+    const map = {
+        queen: {white:'♕', black:'♛'},
+        rook: {white:'♖', black:'♜'},
+        bishop: {white:'♗', black:'♝'},
+        knight: {white:'♘', black:'♞'}
+    };
+    const piece = (map[choice] && map[choice][pendingPromotion.color]) ? map[choice][pendingPromotion.color] : (pendingPromotion.color==='white'?'♕':'♛');
+    boardArr[pendingPromotion.to] = piece;
+    hidePromoModal();
+    from = null;
+    turn = (turn === 'white') ? 'black' : 'white';
+    draw();
+    if(mode === 'ai' && turn === 'black') setTimeout(ai, 400);
+}
+
+// ENGINE GERAK CATUR REAL (DISAMAKAN DENGAN GAME CATUR UMUM)
+function legalMoves(i){
+ const p=boardArr[i];
+ if(!p) return [];
+ const fr=Math.floor(i/8), fc=i%8;
+ const enemy = W.includes(p)?BK:W;
+ let moves=[];
+
+ const add=(r,c)=>{ if(r<0||r>7||c<0||c>7) return; const t=r*8+c; if(boardArr[t] && !enemy.includes(boardArr[t])) return; moves.push(t); };
+ const slide=(dirs)=>{ for(const[dR,dC] of dirs){ let r=fr+dR,c=fc+dC; while(r>=0&&r<=7&&c>=0&&c<=7){ const t=r*8+c; if(boardArr[t]){ if(enemy.includes(boardArr[t])) moves.push(t); break; } moves.push(t); r+=dR; c+=dC; } } };
+
+ // PAWN
+ if(p==='♙'||p==='♟'){
+  const dir=p==='♙'?-1:1;
+  const start=p==='♙'?6:1;
+  if(!boardArr[(fr+dir)*8+fc]){
+   add(fr+dir,fc);
+   if(fr===start && !boardArr[(fr+2*dir)*8+fc]) add(fr+2*dir,fc);
+  }
+    [[dir,-1],[dir,1]].forEach(d=>{
+     const r=fr+d[0],c=fc+d[1];
+     if(r>=0&&r<=7&&c>=0&&c<=7){ const t=r*8+c; if(boardArr[t] && enemy.includes(boardArr[t])) moves.push(t); }
+    });
+ }
+
+ // ROOK
+ if('♜♖'.includes(p)) slide([[1,0],[-1,0],[0,1],[0,-1]]);
+ // BISHOP
+ if('♝♗'.includes(p)) slide([[1,1],[1,-1],[-1,1],[-1,-1]]);
+ // QUEEN
+ if('♛♕'.includes(p)) slide([[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]);
+ // KNIGHT
+ if('♞♘'.includes(p)) [[1,2],[2,1],[-1,2],[-2,1],[1,-2],[2,-1],[-1,-2],[-2,-1]].forEach(d=>add(fr+d[0],fc+d[1]));
+ // KING
+ if('♚♔'.includes(p)) [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]].forEach(d=>add(fr+d[0],fc+d[1]));
+
+ // FILTER: langkah yang bikin raja tetap skak dibuang
+ return moves.filter(t=>{
+  const save=[...boardArr];
+  boardArr[t]=p; boardArr[i]='';
+  const safe=!inCheck(turn);
+  boardArr=[...save];
+  return safe;
+ });
+}
+
+function inCheck(c){const k=c==='white'?'♔':'♚';const ki=boardArr.indexOf(k);if(ki<0)return false;return boardArr.some((p,i)=>p&&((c==='white'&&BK.includes(p))||(c==='black'&&W.includes(p)))&&attack(i,ki,p));}
+
+function attack(f,t,p){
+ const fr=Math.floor(f/8),fc=f%8,tr=Math.floor(t/8),tc=t%8;
+ const dr=Math.sign(tr-fr),dc=Math.sign(tc-fc);
+ const clear=()=>{let r=fr+dr,c=fc+dc;while(r!==tr||c!==tc){if(boardArr[r*8+c])return false;r+=dr;c+=dc;}return true;};
+ if('♜♖'.includes(p))return(fr===tr||fc===tc)&&clear();
+ if('♝♗'.includes(p))return Math.abs(tr-fr)===Math.abs(tc-fc)&&clear();
+ if('♛♕'.includes(p))return((fr===tr||fc===tc)||Math.abs(tr-fr)===Math.abs(tc-fc))&&clear();
+ if('♞♘'.includes(p))return Math.abs((tr-fr)*(tc-fc))===2;
+ if(p==='♟')return tr-fr===1&&Math.abs(tc-fc)===1;
+ if(p==='♙')return tr-fr===-1&&Math.abs(tc-fc)===1;
+ if('♚♔'.includes(p))return Math.max(Math.abs(tr-fr),Math.abs(tc-fc))===1;
+ return false;
+}
+
+function checkState(){
+ if(inCheck(turn)){
+    if(noMoves(turn)){
+        O.textContent='SKAK MAT'; O.style.display='flex';
+    } else {
+        S.textContent='SKAK'; O.textContent='SKAK'; O.style.display='flex';
+    }
+ } else {
+    if(noMoves(turn)){
+        // stalemate -> remis
+        O.textContent='REMIS'; O.style.display='flex'; S.textContent='';
+    } else {
+        S.textContent=''; O.style.display='none';
+    }
+ }
+}
+
+function noMoves(c){return !boardArr.some((p,i)=>p&&((c==='white'&&W.includes(p))||(c==='black'&&BK.includes(p)))&&legalMoves(i).length);}
+
+function ai(){let best=[];boardArr.forEach((p,i)=>{if(!BK.includes(p))return;legalMoves(i).forEach(t=>best.push([i,t]));});if(!best.length)return;const[mf,mt]=best[Math.floor(Math.random()*best.length)];boardArr[mt]=boardArr[mf];boardArr[mf]='';turn='white';draw();}
+</script>
+<div id="credit">Dean Chess — dibuat oleh Dean</div>
+</body>
+</html>
+
